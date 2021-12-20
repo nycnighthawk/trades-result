@@ -55,8 +55,8 @@ def _main_entrypoint(cli_args):
     transactions = tuple(csv_to_transactions(cli_args.file))
 
     if cli_args.symbols:
-        symbols = tuple(
-            map(lambda i: i.strip().lower(), cli_args.symbols.split(",")))
+        symbols = {
+            symbol.strip().lower() for symbol in cli_args.symbols.split(",")}
         filtered_result = reduce(
             filtered_gain_loss(symbols),
             transactions,
@@ -91,4 +91,3 @@ if __name__ == '__main__':
     )
     cli_args = cli_parser.parse_args()
     _main_entrypoint(cli_args)
-

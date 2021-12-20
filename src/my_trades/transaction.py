@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, date
 from functools import reduce
 from pathlib import Path
+from dateutil.relativedelta import relativedelta
 
 
 SYMBOL = 0
@@ -66,7 +67,8 @@ def convert_currency(value):
 
 
 def extract_option_date(value):
-    return datetime.strptime(value, '%y%m%d')
+    return datetime.strptime(value, '%y%m%d').date()
+
 
 OPTION_TYPES = 'cpCP'
 
@@ -102,8 +104,10 @@ DATE_FORMAT = '%m/%d/%Y'
 def build_transaction(holding: Stock | Call | Put,
                       cusip: str,
                       csv_entry):
-    acquired_date = datetime.strptime(csv_entry[ACQUIRED_DATE], DATE_FORMAT)
-    sold_date = datetime.strptime(csv_entry[SOLD_DATE], DATE_FORMAT)
+    acquired_date = datetime.strptime(
+        csv_entry[ACQUIRED_DATE], DATE_FORMAT).date()
+    sold_date = datetime.strptime(
+        csv_entry[SOLD_DATE], DATE_FORMAT).date()
     proceed = convert_currency(csv_entry[PROCEED].rstrip())
     cost = convert_currency(csv_entry[COST].rstrip())
     short_term_gain_loss = convert_currency(csv_entry[SHORT_TERM_GAIN_LOSS])
@@ -134,3 +138,82 @@ def csv_to_transactions(csv_file: str):
         next(csv_reader)
         yield from (
             csv_entry_to_transaction(entry) for entry in csv_reader)
+
+
+def in_date_range(filtered_dates):
+    def is_date_in_range(date_check):
+        for start_date, end_date in filtered_dates:
+            if date_check >= start_date and date_check <= end_date:
+                return True
+        return False
+    return is_date_in_range
+
+
+WASHED_TRANSACTION_30_DAYS_BEFORE = relativedelta(days=-30)
+WASHED_TRANSACTION_30_DAYS_AFTER = relativedelta(days=30)
+
+
+def filter_transaction_by_dates(filtered_dates):
+    washed_transaction_periods = {
+        (date_entry + WASHED_TRANSACTION_30_DAYS_BEFORE,
+         date_entry + WASHED_TRANSACTION_30_DAYS_AFTER) for date_entry in
+        filtered_dates
+    }
+
+    is_date_within_washed_sale_period = in_date_range(
+        washed_transaction_periods)
+
+    def transaction_in_filtered_date(transaction):
+        if not filtered_dates:
+            return True
+        if isinstance(transaction.holding, Option):
+            if transaction.holding.expiration in filtered_dates:
+                return True
+            return False
+        if is_date_within_washed_sale_period(transaction.acquired_date) \
+                or is_date_within_washed_sale_period(transaction.sold_date):
+            return True
+        return False
+
+    return transaction_in_filtered_date
+
+def _main_entrypoint(cli_args):
+    symbols = {
+        symbol.strip().lower() for symbol in cli_args.symbols.split(',')}
+    if cli_args.dates:
+        filtered_dates = {
+            datetime.strptime(date_text.strip(), '%y%m%d').date() for date_text
+            in cli_args.dates.split(',')
+        }
+    else:
+        filtered_dates = set()
+    in_filtered_dates = filter_transaction_by_dates(filtered_dates)
+    final_result = defaultdict(list)
+    for transaction in csv_to_transactions(cli_args.file):
+        if transaction.holding.symbol in symbols \
+                and in_filtered_dates(transaction):
+            final_result[transaction.holding.symbol].append(transaction)
+
+    for symbol, filtered_transactions in final_result.items():
+        print(f'Symbol: {symbol}\nTransactions:')
+        for transaction in filtered_transactions:
+            print(transaction)
+        print('-' * 80)
+
+
+if __name__ == '__main__':
+    import argparse
+    cli_parser = argparse.ArgumentParser(epilog='knowledge is power!')
+    cli_parser.add_argument(
+        '-file', action='store', required=True,
+        help='csv gain lost file')
+    cli_parser.add_argument(
+        '-symbols', action='store', required=True,
+        help="comma separated symbols to filter"
+    )
+    cli_parser.add_argument(
+        '-dates', action='store',
+        help="comma separated date in the format of YYMMDD"
+    )
+    cli_args = cli_parser.parse_args()
+    _main_entrypoint(cli_args)
