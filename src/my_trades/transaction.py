@@ -204,11 +204,13 @@ def extract_report_component(
 
 
 entry_format = '| {:10} | {:<10} | {:10} | {:10} | {:10} | {:10} |'.format
-header_break = '+' + '=' * 77 + '+'
-entry_break = '+' + '-' * 77 + '+'
+header_break = '+' + '='* 77 + '+'
+# entry_break = '+' + '-' * 77 + '+'
+entry_break = '+' + ('-' * 12 + '+') * 5 + '-' * 12 + '+'
 
 
 def report_in_text(result):
+    yield header_break
     yield entry_format('Symbol', 'Strike', 'Expiration', 'Acquired',
                        'Sold', 'Gain/Loss')
     yield header_break
