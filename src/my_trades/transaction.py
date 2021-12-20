@@ -19,6 +19,7 @@ COST = 6
 SHORT_TERM_GAIN_LOSS = 7
 LONG_TERM_GAIN_LOSS = 8
 
+
 @dataclass
 class Equity:
     symbol: str
@@ -177,6 +178,52 @@ def filter_transaction_by_dates(filtered_dates):
 
     return transaction_in_filtered_date
 
+
+REPORT_DATE_FORMAT = '%m-%d-%Y'
+ZERO = Decimal(0)
+
+
+def extract_report_component(
+    transaction: Transaction
+) -> tuple:
+    gain_loss = transaction.short_term_gain_loss
+    if transaction.long_term_gain_loss != ZERO:
+        gain_loss = transaction.long_term_gain_loss
+    if isinstance(transaction.holding, Option):
+        return (
+            transaction.holding.strike,
+            transaction.holding.expiration.strftime(REPORT_DATE_FORMAT),
+            transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
+            transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+            gain_loss)
+    return (
+        '', '', transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
+        transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+        gain_loss
+    )
+
+
+entry_format = '| {:10} | {:<10} | {:10} | {:10} | {:10} | {:10} |'.format
+header_break = '+' + '=' * 77 + '+'
+entry_break = '+' + '-' * 77 + '+'
+
+
+def report_in_text(result):
+    yield entry_format('Symbol', 'Strike', 'Expiration', 'Acquired',
+                       'Sold', 'Gain/Loss')
+    yield header_break
+    for symbol, transactions in result.items():
+        do_symbol_output = True
+        for transaction in transactions:
+            if do_symbol_output:
+                do_symbol_output = False
+                yield entry_format(
+                    symbol, *extract_report_component(transaction))
+            else:
+                yield entry_format('', *extract_report_component(transaction))
+        yield entry_break
+
+
 def _main_entrypoint(cli_args):
     symbols = {
         symbol.strip().lower() for symbol in cli_args.symbols.split(',')}
@@ -194,11 +241,7 @@ def _main_entrypoint(cli_args):
                 and in_filtered_dates(transaction):
             final_result[transaction.holding.symbol].append(transaction)
 
-    for symbol, filtered_transactions in final_result.items():
-        print(f'Symbol: {symbol}\nTransactions:')
-        for transaction in filtered_transactions:
-            print(transaction)
-        print('-' * 80)
+    print("\n".join(report_in_text(final_result)))
 
 
 if __name__ == '__main__':
