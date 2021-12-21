@@ -187,9 +187,16 @@ def extract_report_component(
     transaction: Transaction
 ) -> tuple:
     gain_loss = transaction.proceed - transaction.cost
-    if isinstance(transaction.holding, Option):
+    if isinstance(transaction.holding, Call):
         return (
-            transaction.holding.strike,
+            f'C: {transaction.holding.strike}',
+            transaction.holding.expiration.strftime(REPORT_DATE_FORMAT),
+            transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
+            transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+            gain_loss)
+    elif isinstance(transaction.holding, Put):
+        return (
+            f'P: {transaction.holding.strike}',
             transaction.holding.expiration.strftime(REPORT_DATE_FORMAT),
             transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
             transaction.sold_date.strftime(REPORT_DATE_FORMAT),
