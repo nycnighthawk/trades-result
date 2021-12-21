@@ -214,6 +214,7 @@ def report_in_text(result):
     yield header_break
     for symbol, transactions in result.items():
         do_symbol_output = True
+        total = Decimal(0)
         for transaction in transactions:
             if do_symbol_output:
                 do_symbol_output = False
@@ -221,6 +222,9 @@ def report_in_text(result):
                     symbol, *extract_report_component(transaction))
             else:
                 yield entry_format('', *extract_report_component(transaction))
+            total += transaction.proceed - transaction.cost
+        yield entry_break
+        yield '|' + ' ' * 51 + '| {:10} | {:10} |'.format('gain/loss', total)
         yield entry_break
 
 
