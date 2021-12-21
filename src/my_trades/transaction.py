@@ -16,8 +16,8 @@ ACQUIRED_DATE = 3
 SOLD_DATE = 4
 PROCEED = 5
 COST = 6
-SHORT_TERM_GAIN_LOSS = 7
-LONG_TERM_GAIN_LOSS = 8
+# SHORT_TERM_GAIN_LOSS = 7
+# LONG_TERM_GAIN_LOSS = 8
 
 
 @dataclass
@@ -53,8 +53,8 @@ class Transaction:
     sold_date: date
     cost: Decimal
     proceed: Decimal
-    short_term_gain_loss: Decimal
-    long_term_gain_loss: Decimal
+    # short_term_gain_loss: Decimal
+    # long_term_gain_loss: Decimal
 
 
 def convert_currency(value):
@@ -111,13 +111,13 @@ def build_transaction(holding: Stock | Call | Put,
         csv_entry[SOLD_DATE], DATE_FORMAT).date()
     proceed = convert_currency(csv_entry[PROCEED].rstrip())
     cost = convert_currency(csv_entry[COST].rstrip())
-    short_term_gain_loss = convert_currency(csv_entry[SHORT_TERM_GAIN_LOSS])
-    long_term_gain_loss = convert_currency(csv_entry[LONG_TERM_GAIN_LOSS])
+    # short_term_gain_loss = convert_currency(csv_entry[SHORT_TERM_GAIN_LOSS])
+    # long_term_gain_loss = convert_currency(csv_entry[LONG_TERM_GAIN_LOSS])
     quantity = int(csv_entry[QUANTITY].split('.')[0])
     return Transaction(
         holding, cusip, csv_entry[DESCRIPTION],
-        quantity, acquired_date, sold_date, cost, proceed,
-        short_term_gain_loss, long_term_gain_loss)
+        quantity, acquired_date, sold_date, cost, proceed)
+        # short_term_gain_loss, long_term_gain_loss)
 
 
 def csv_entry_to_transaction(csv_entry):
@@ -186,9 +186,7 @@ ZERO = Decimal(0)
 def extract_report_component(
     transaction: Transaction
 ) -> tuple:
-    gain_loss = transaction.short_term_gain_loss
-    if transaction.long_term_gain_loss != ZERO:
-        gain_loss = transaction.long_term_gain_loss
+    gain_loss = transaction.proceed - transaction.cost
     if isinstance(transaction.holding, Option):
         return (
             transaction.holding.strike,

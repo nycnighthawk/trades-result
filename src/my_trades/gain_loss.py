@@ -3,21 +3,31 @@
 from collections import defaultdict
 from decimal import Decimal
 from functools import reduce
-from .transaction import Transaction, csv_to_transactions
+from .transaction import Transaction, csv_to_transactions, Option
+from datetime import timedelta
 
+ONE_YEAR = timedelta(days=365)
 
 def calculate_long_term_gain_loss(
     accumulator: Decimal,
     transaction: Transaction
 ) -> Decimal:
-    return accumulator + transaction.long_term_gain_loss
+    if isinstance(transaction.holding, Option):
+        return accumulator
+    if (transaction.sold_date - transaction.acquired_date) > ONE_YEAR:
+        return accumulator + (transaction.proceed - transaction.cost)
+    return accumulator
 
 
 def calculate_short_term_gain_loss(
     accumulator: Decimal,
     transaction: Transaction
 ) -> Decimal:
-    return accumulator + transaction.short_term_gain_loss
+    if isinstance(transaction.holding, Option):
+        return accumulator + (transaction.proceed - transaction.cost)
+    if (transaction.sold_date - transaction.acquired_date) < ONE_YEAR:
+        return accumulator + (transaction.proceed - transaction.cost)
+    return accumulator
 
 
 def gain_loss(cumulative_gain_loss: tuple[Decimal, Decimal],
@@ -67,7 +77,6 @@ def _main_entrypoint(cli_args):
             print(f' long term gain/loss: {value[1]}')
             print(f'     total gain/loss: {value[0] + value[1]}')
             print('-' * 40)
-
     print('Summary:')
     short_term_gain_loss, long_term_gain_loss = \
         reduce(gain_loss, transactions,
