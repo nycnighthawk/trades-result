@@ -193,6 +193,8 @@ def extract_report_component(
             transaction.holding.expiration.strftime(REPORT_DATE_FORMAT),
             transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
             transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+            transaction.cost,
+            transaction.proceed,
             gain_loss)
     elif isinstance(transaction.holding, Put):
         return (
@@ -200,24 +202,28 @@ def extract_report_component(
             transaction.holding.expiration.strftime(REPORT_DATE_FORMAT),
             transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
             transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+            transaction.cost,
+            transaction.proceed,
             gain_loss)
     return (
         '', '', transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
         transaction.sold_date.strftime(REPORT_DATE_FORMAT),
+        transaction.cost,
+        transaction.proceed,
         gain_loss
     )
 
 
-entry_format = '| {:10} | {:<10} | {:10} | {:10} | {:10} | {:10} |'.format
-header_break = '+' + '='* 77 + '+'
-# entry_break = '+' + '-' * 77 + '+'
-entry_break = '+' + ('-' * 12 + '+') * 5 + '-' * 12 + '+'
+entry_format = '| {:10} | {:<10} | {:10} | {:10} | {:10} | {:10} | {:10} | {:10} |'.format
+header_break = '+' + '='* 103 + '+'
+# entry_break = '+' + '-' * 103 + '+'
+entry_break = '+' + ('-' * 12 + '+') * 7 + '-' * 12 + '+'
 
 
 def report_in_text(result):
     yield header_break
     yield entry_format('Symbol', 'Strike', 'Expiration', 'Acquired',
-                       'Sold', 'Gain/Loss')
+                       'Sold', 'Cost', 'Proceed', 'Gain/Loss')
     yield header_break
     for symbol, transactions in result.items():
         do_symbol_output = True
@@ -231,7 +237,7 @@ def report_in_text(result):
                 yield entry_format('', *extract_report_component(transaction))
             total += transaction.proceed - transaction.cost
         yield entry_break
-        yield '|' + ' ' * 51 + '| {:10} | {:10} |'.format('gain/loss', total)
+        yield '|' + ' ' * 77 + '| {:10} | {:10} |'.format('gain/loss', total)
         yield entry_break
 
 
