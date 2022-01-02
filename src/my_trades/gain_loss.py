@@ -1,10 +1,12 @@
 #!/bin/env python
 
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 from functools import reduce
-from .transaction import Transaction, csv_to_transactions, Option
-from datetime import timedelta
+from itertools import tee
+from .transaction import csv_to_transactions
+from .record import Transaction, Option
 
 ONE_YEAR = timedelta(days=365)
 
@@ -62,14 +64,15 @@ def filtered_gain_loss(
 
 def _main_entrypoint(cli_args):
 
-    transactions = tuple(csv_to_transactions(cli_args.file))
+    transactions, filtered_processing = \
+        tee(csv_to_transactions(cli_args.file, cli_args.account))
 
     if cli_args.symbols:
         symbols = {
             symbol.strip().lower() for symbol in cli_args.symbols.split(",")}
         filtered_result = reduce(
             filtered_gain_loss(symbols),
-            transactions,
+            filtered_processing,
             defaultdict(lambda: (Decimal(0), Decimal(0))))
         for key, value in filtered_result.items():
             print(f'              Symbol: {key}')
@@ -94,6 +97,9 @@ if __name__ == '__main__':
     cli_parser.add_argument(
         '-file', action='store', required=True,
         help='csv gain lost file')
+    cli_parser.add_argument(
+        '-account', action='store', default='generic',
+        help='account number')
     cli_parser.add_argument(
         '-symbols', action='store',
         help="comma separated symbols to filter"
