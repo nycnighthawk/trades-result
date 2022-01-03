@@ -2,10 +2,9 @@
 
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from itertools import tee
-from operator import itemgetter
 from pathlib import Path
 import sqlite3
 from typing import Iterable, Callable
@@ -16,10 +15,16 @@ from .record import (
 DB_SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE account_type (
+    account_type TEXT NOT NULL,
+    PRIMARY KEY (account_type));
+
 CREATE TABLE account (
     account_number TEXT NOT NULL,
-    description TEXT DEFAULT "" NOT NULL,
-    PRIMARY KEY(account_number));
+    account_type TEXT NOT NULL,
+    PRIMARY KEY (account_number)
+    FOREIGN KEY (account_type) REFERENCES account_type(account_type)
+        ON DELETE CASCADE ON UPDATE CASCADE);
 
 CREATE TABLE equity_class (
     equity_class TEXT NOT NULL,
@@ -58,6 +63,11 @@ VALUES
     ('stock'),
     ('call'),
     ('put');
+
+INSERT INTO account_type (account_type)
+VALUES
+    ('single'),
+    ('joint');
 """
 
 
@@ -145,31 +155,41 @@ def trade_to_transaction(trade: Trade) -> Transaction:
                        trade.transaction_id)
 
 
+DB_TIME_FORMAT = '%Y-%m-%d'
+
+
 def _to_holding(row: sqlite3.Row) -> Stock | Call | Put:
     equity_class = row['equity_class']
     if equity_class == STOCK_CLASS:
         return Stock(row['symbol'])
     if equity_class == CALL_CLASS:
-        return Call(row['symbol'], _to_decimal(row['strike']),
-                    row['expiration'])
-    return Put(row['symbol'], _to_decimal(row['strike']), row['expiration'])
+        return Call(
+            row['symbol'], _to_decimal(row['strike']),
+            datetime.strptime(row['expiration'], DB_TIME_FORMAT).date())
+    return Put(row['symbol'], _to_decimal(row['strike']),
+               datetime.strptime(row['expiration'], DB_TIME_FORMAT).date())
 
 
 def trade_row_to_transaction(row: sqlite3.Row) -> Transaction:
     holding = _to_holding(row)
     return Transaction(
         row['account_number'], holding, row['cusip'], row['description'],
-        _to_decimal(row['quantity']), row['acquired_date'],
-        row['sold_date'], _to_decimal(row['cost']),
+        _to_decimal(row['quantity']),
+        datetime.strptime(row['acquired_date'], DB_TIME_FORMAT).date(),
+        datetime.strptime(row['sold_date'], DB_TIME_FORMAT).date(),
+        _to_decimal(row['cost']),
         _to_decimal(row['proceed']), row['transaction_id'])
 
 
 def trade_row_to_trade(row: sqlite3.Row) -> Trade:
-    return Trade(row['account_number'], row['transaction_id'], row['cusip'],
-                 row['symbol'], row['equity_class'], row['strike'],
-                 row['quantity'], row['expiration'], row['acquired_date'],
-                 row['sold_date'], row['cost'], row['proceed'],
-                 row['description'])
+    return Trade(
+        row['account_number'], row['transaction_id'], row['cusip'],
+        row['symbol'], row['equity_class'], row['strike'],
+        row['quantity'],
+        datetime.strptime(row['expiration'], DB_TIME_FORMAT).date(),
+        datetime.strptime(row['acquired_date'], DB_TIME_FORMAT).date(),
+        datetime.strptime(row['sold_date'], DB_TIME_FORMAT).date(),
+        row['cost'], row['proceed'], row['description'])
 
 
 def transactions_to_trades(
@@ -194,8 +214,8 @@ VALUES
     (?,?,?,?,?,?,?,?,?,?,?,?,?);
 """
 INSERT_ACCOUNT_SQL = """
-INSERT INTO account (account_number)
-VALUES (?);
+INSERT INTO account (account_number, account_type)
+VALUES (?,?);
 """
 INSERT_SYMBOL_SQL = """
 INSERT INTO symbol (symbol)
@@ -214,7 +234,8 @@ SELECT symbol FROM symbol;
 
 
 def insert_transactions(
-    transactions: Iterable[Transaction]
+    transactions: Iterable[Transaction],
+    account_type: str
 ) -> Callable[[sqlite3.Connection], None]:
 
     trades = transactions_to_trades(transactions)
@@ -227,9 +248,13 @@ def insert_transactions(
                    trade.sold_date, trade.cost, trade.proceed,
                    trade.description)
 
-    def prepare_str(entries: Iterable[str]) -> Iterable[tuple]:
-        for entry in entries:
-            yield (entry,)
+    def prepare_account(accounts: Iterable[str]) -> Iterable[tuple]:
+        for account in accounts:
+            yield (account, account_type)
+
+    def prepare_symbol(symbols: Iterable[str]) -> Iterable[tuple]:
+        for symbol in symbols:
+            yield (symbol,)
 
     def insert_account_to_db(trades: Iterable[Trade],
                              connection: sqlite3.Connection) -> None:
@@ -239,7 +264,7 @@ def insert_transactions(
                         if t.account_number not in account_numbers}
         if new_accounts:
             connection.executemany(
-                INSERT_ACCOUNT_SQL, prepare_str(new_accounts))
+                INSERT_ACCOUNT_SQL, prepare_account(new_accounts))
             connection.commit()
 
     def insert_symbol_to_db(trades: Iterable[Trade],
@@ -250,7 +275,7 @@ def insert_transactions(
                        if t.symbol not in existing_symbols}
         if new_symbols:
             connection.executemany(
-                INSERT_SYMBOL_SQL, prepare_str(new_symbols))
+                INSERT_SYMBOL_SQL, prepare_symbol(new_symbols))
             connection.commit()
 
     def insert_to_db(connection: sqlite3.Connection) -> None:
@@ -278,8 +303,12 @@ def _main_entrypoint(cli_args):
     else:
         account_number = cli_args.account
     transactions = csv_to_transactions(f'{cli_args.file}', account_number)
-    insert_transactions(transactions)(conn)
+    insert_transactions(transactions, cli_args.account_type)(conn)
 
+
+DEFAULT_DB_FILE = 'trades.db'
+DEFAULT_DB_PATH = (Path(__file__).expanduser() \
+                   / '../../../playground').resolve() / DEFAULT_DB_FILE
 
 if __name__ == '__main__':
     import argparse
@@ -292,10 +321,12 @@ if __name__ == '__main__':
         '-account', action='store', default='generic',
         help='account number')
     cli_parser.add_argument(
+        '-account_type', action='store', default='joint',
+        choices=('joint', 'single'),
+        help="type of account, default to 'joint'")
+    cli_parser.add_argument(
         '-db', action='store',
-        default=(
-            (Path(__file__).expanduser() / '../../../playground').resolve()
-            / 'trades.db'),
+        default=DEFAULT_DB_PATH,
         type=Path,
         help='db file')
 
