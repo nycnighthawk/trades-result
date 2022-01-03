@@ -167,7 +167,7 @@ SELECT account_number FROM account
     query_with_filter = \
 """
 SELECT account_number FROM account
-WHERE account_type = "{}"
+WHERE account_type = '{}'
 """
     return query_with_filter.format(account_type).strip()
 
@@ -183,19 +183,19 @@ def new_dates_filter_sql(dates):
          date_entry + WASHED_TRANSACTION_30_DAYS_AFTER) for date_entry in
         option_dates}
     option_date_filter_sql = 'expiration in ({})'.format(
-        ", ".join(map(lambda x: f'date("{x}")', option_dates)))
+        ", ".join(map(lambda x: f"date('{x}')", option_dates)))
     equity_date_filter_sql = "OR ".join(
         ['(sold_date BETWEEN {} AND {})'.format(
-        f'date("{x[0]}")', f'date("{x[1]}")') for x in stock_sold_dates])
+        f"date('{x[0]}')", f"date('{x[1]}')") for x in stock_sold_dates])
     return (f'({option_date_filter_sql}) OR '
-            f'(equity_class="stock" AND ({equity_date_filter_sql}))')
+            f"(equity_class='stock' AND ({equity_date_filter_sql}))")
 
 
 def new_symbols_filter_sql(symbols):
     if not symbols:
         return ""
     symbol_filter_sql = "symbol IN ({})".format(
-        ", ".join(map(lambda x: f'"{x.strip()}"', symbols.split(","))))
+        ", ".join(map(lambda x: f"'{x.strip()}'", symbols.split(","))))
     return symbol_filter_sql
 
 
