@@ -82,7 +82,9 @@ def init_connection(file: str = ':memory:'):
         file_path = Path(file).expanduser().resolve()
         if not file_path.exists():
             need_schema = True
-        connection = sqlite3.connect(file_path.as_uri(), uri=True)
+        connection = sqlite3.connect(
+            file_path.as_uri(), uri=True,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     if need_schema:
         create_schema(connection)
     connection.row_factory = sqlite3.Row
@@ -155,19 +157,14 @@ def trade_to_transaction(trade: Trade) -> Transaction:
                        trade.transaction_id)
 
 
-DB_TIME_FORMAT = '%Y-%m-%d'
-
-
 def _to_holding(row: sqlite3.Row) -> Stock | Call | Put:
     equity_class = row['equity_class']
     if equity_class == STOCK_CLASS:
         return Stock(row['symbol'])
     if equity_class == CALL_CLASS:
-        return Call(
-            row['symbol'], _to_decimal(row['strike']),
-            datetime.strptime(row['expiration'], DB_TIME_FORMAT).date())
-    return Put(row['symbol'], _to_decimal(row['strike']),
-               datetime.strptime(row['expiration'], DB_TIME_FORMAT).date())
+        return Call(row['symbol'], _to_decimal(row['strike']),
+            row['expiration'])
+    return Put(row['symbol'], _to_decimal(row['strike']), row['expiration'])
 
 
 def trade_row_to_transaction(row: sqlite3.Row) -> Transaction:
@@ -175,8 +172,8 @@ def trade_row_to_transaction(row: sqlite3.Row) -> Transaction:
     return Transaction(
         row['account_number'], holding, row['cusip'], row['description'],
         _to_decimal(row['quantity']),
-        datetime.strptime(row['acquired_date'], DB_TIME_FORMAT).date(),
-        datetime.strptime(row['sold_date'], DB_TIME_FORMAT).date(),
+        row['acquired_date'],
+        row['sold_date'],
         _to_decimal(row['cost']),
         _to_decimal(row['proceed']), row['transaction_id'])
 
@@ -186,9 +183,9 @@ def trade_row_to_trade(row: sqlite3.Row) -> Trade:
         row['account_number'], row['transaction_id'], row['cusip'],
         row['symbol'], row['equity_class'], row['strike'],
         row['quantity'],
-        datetime.strptime(row['expiration'], DB_TIME_FORMAT).date(),
-        datetime.strptime(row['acquired_date'], DB_TIME_FORMAT).date(),
-        datetime.strptime(row['sold_date'], DB_TIME_FORMAT).date(),
+        row['expiration'],
+        row['acquired_date'],
+        row['sold_date'],
         row['cost'], row['proceed'], row['description'])
 
 
