@@ -1,20 +1,37 @@
 #!/bin/env python
 from decimal import Decimal
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, date
-from functools import reduce
-from pathlib import Path
 from dateutil.relativedelta import relativedelta
-from .record import (
-    Equity, Option, Call, Put, Stock, Transaction, csv_to_transactions)
+from itertools import chain
+from pathlib import Path
+from typing import Iterable
+from .record import Option, Call, Put, Transaction, csv_to_transactions
 from .database import trade_row_to_transaction
 
 
-def in_date_range(filtered_dates):
-    def is_date_in_range(date_check):
-        for start_date, end_date in filtered_dates:
-            if date_check >= start_date and date_check <= end_date:
+def in_date_range(
+    filtered_dates: Iterable[tuple[date | None, date | None] | date]
+):
+    date_ranges = [date_data for date_data in filtered_dates
+                   if isinstance(date_data, tuple)]
+    dates = [date_data for date_data in filtered_dates
+             if not isinstance(date_data, tuple)]
+    def is_date_in_range(date_being_checked):
+        for start_date, end_date in date_ranges:
+            if start_date is None and end_date is None:
+                return False
+            if start_date and date_being_checked >= start_date \
+                    and not end_date:
+                return True
+            if end_date and date_being_checked <= end_date \
+                    and not start_date:
+                return True
+            if date_being_checked >= start_date \
+                    and date_being_checked <= end_date:
+                return True
+        for date_to_check in dates:
+            if date_being_checked == date_to_check:
                 return True
         return False
     return is_date_in_range
@@ -112,8 +129,10 @@ def extract_report_component(
     )
 
 
-header_format = '| {:10} | {:<10.2} | {:<10} | {:10} | {:10} | {:10} | {:10} | {:10} | {:10} |'.format
-entry_format = '| {:10} | {:<10.2f} | {:<10} | {:10} | {:10} | {:10} | {:10} | {:10} | {:10} |'.format
+header_format = ('| {:10} | {:<10.2} | {:<10} | {:10} | '
+                 '{:10} | {:10} | {:10} | {:10} | {:10} |').format
+entry_format = ('| {:10} | {:<10.2f} | {:<10} | {:10} | {:10} '
+                '| {:10} | {:10} | {:10} | {:10} |').format
 header_break = '+' + '='* 116 + '+'
 # entry_break = '+' + '-' * 103 + '+'
 entry_break = '+' + ('-' * 12 + '+') + ('-' * 12 + '+') * 7 + '-' * 12 + '+'
@@ -121,8 +140,9 @@ entry_break = '+' + ('-' * 12 + '+') + ('-' * 12 + '+') * 7 + '-' * 12 + '+'
 
 def report_in_text(result: dict):
     yield header_break
-    yield header_format('Symbol', 'quantity', 'Strike', 'Expiration',
-                       'Acquired', 'Sold', 'Cost', 'Proceed', 'Gain/Loss')
+    yield header_format(
+        'Symbol', 'quantity', 'Strike', 'Expiration', 'Acquired', 'Sold',
+        'Cost', 'Proceed', 'Gain/Loss')
     yield header_break
     total_summary = Decimal(0)
     for symbol, transactions in result.items():
@@ -140,7 +160,8 @@ def report_in_text(result: dict):
         yield entry_break
         yield '|' + ' ' * 90 + '| {:10} | {:10} |'.format('gain/loss', total)
         yield entry_break
-    yield '|' + ' ' * 77 + '| {:>23} | {:10} |'.format('total gain/loss', total_summary)
+    yield '|' + ' ' * 77 + '| {:>23} | {:10} |'.format(
+        'total gain/loss', total_summary)
     yield entry_break
 
 
@@ -172,23 +193,61 @@ WHERE account_type = '{}'
     return query_with_filter.format(account_type).strip()
 
 
-def new_dates_filter_sql(dates):
+SQL_DATE = "date('{}')".format
+
+
+def parse_date(date_range: str):
+    if '-' in date_range:
+        start_date, end_date = date_range.split('-')
+        start_date = datetime.strptime(start_date.strip(), '%y%m%d').date() \
+            if start_date else None
+        end_date = datetime.strptime(end_date.strip(), '%y%m%d').date() \
+            if end_date else None
+        return (start_date, end_date)
+    return datetime.strptime(date_range.strip(), '%y%m%d').date()
+
+
+def date_range_filter_sql(date_range: tuple[date | None, date | None]) -> str:
+    start_date, end_date = date_range
+    if start_date and end_date:
+        return f'BETWEEN {SQL_DATE(start_date)} and {SQL_DATE(end_date)}'
+    if start_date:
+        return f'>= {SQL_DATE(start_date)}'
+    return f'<= {SQL_DATE(end_date)}'
+
+
+def _dates_filter_sql(
+    field_name: str,
+    dates: tuple[list[tuple[date | None, date | None]], list[date]]
+) -> str:
+    date_range_filter = (
+        '({} {})'.format(field_name, date_range_filter_sql(date_range))
+        for date_range in dates[0])
+    date_filter = ('({} IN ({}))'.format(field_name,
+        ", ".join(map(lambda x: SQL_DATE(x), dates[1]))),) if dates[1] \
+        else tuple()
+    return " OR ".join(chain(date_range_filter, date_filter))
+
+
+def group_dates(
+    dates: Iterable[tuple[date | None, date | None] | date]
+) -> tuple[list[tuple[date | None, date | None]], list[date]]:
+    date_ranges = []
+    single_dates = []
+    for date in dates:
+        if isinstance(date, tuple):
+            date_ranges.append(date)
+        else:
+            single_dates.append(date)
+    return date_ranges, single_dates
+
+
+def dates_filter_sql(field_name: str, dates: str) -> str:
     if not dates:
         return ""
-    option_dates = {
-        datetime.strptime(date_text.strip(), '%y%m%d').date() for date_text
-        in dates.split(',')}
-    stock_sold_dates = {
-        (date_entry + WASHED_TRANSACTION_30_DAYS_BEFORE,
-         date_entry + WASHED_TRANSACTION_30_DAYS_AFTER) for date_entry in
-        option_dates}
-    option_date_filter_sql = 'expiration in ({})'.format(
-        ", ".join(map(lambda x: f"date('{x}')", option_dates)))
-    equity_date_filter_sql = "OR ".join(
-        ['(sold_date BETWEEN {} AND {})'.format(
-        f"date('{x[0]}')", f"date('{x[1]}')") for x in stock_sold_dates])
-    return (f'({option_date_filter_sql}) OR '
-            f"(equity_class='stock' AND ({equity_date_filter_sql}))")
+    dates_group = group_dates(
+        parse_date(date.strip()) for date in dates.split(','))
+    return _dates_filter_sql(field_name, dates_group)
 
 
 def new_symbols_filter_sql(symbols):
@@ -199,14 +258,18 @@ def new_symbols_filter_sql(symbols):
     return symbol_filter_sql
 
 
-def new_where_sql(account_filter, symbol_filter, date_filter):
+def new_where_sql(
+    account_filter, symbol_filter, expiration_filter,
+    date_range_filter) -> str:
     where_clause = []
     if account_filter:
         where_clause.append(f'(account_number IN ({account_filter}))')
     if symbol_filter:
         where_clause.append(f'({symbol_filter})')
-    if date_filter:
-        where_clause.append(f'({date_filter})')
+    if expiration_filter:
+        where_clause.append(f'({expiration_filter})')
+    if date_range_filter:
+        where_clause.append(f'({date_range_filter})')
     if where_clause:
         return f" WHERE {' AND '.join(where_clause)}"
     return ""
@@ -218,11 +281,14 @@ TRADE_ORDER_SQL = ' ORDER BY symbol, equity_class, sold_date'
 def _handle_db(cli_args):
     from .database import init_connection
     account_filter_sql = new_account_filter_sql(cli_args.account)
-    date_filter_sql = new_dates_filter_sql(cli_args.dates)
+    expiration_filter_sql = dates_filter_sql(
+        'expiration', cli_args.expiration)
+    sold_date_sql = dates_filter_sql('sold_date', cli_args.dates)
     symbol_filter_sql = new_symbols_filter_sql(cli_args.symbols)
     #conn = init_connection(f'{cli_args.db_file}')
     where_sql = new_where_sql(
-        account_filter_sql, symbol_filter_sql, date_filter_sql)
+        account_filter_sql, symbol_filter_sql, expiration_filter_sql,
+        sold_date_sql)
     query_sql = SELECT_TRADE_SQL + where_sql + TRADE_ORDER_SQL + ';'
     conn = init_connection(f'{cli_args.db_file}')
     transactions = defaultdict(list)
@@ -240,6 +306,9 @@ def _main_entrypoint(cli_args):
 
 
 if __name__ == '__main__':
+
+    import sys
+
     def build_csv_sub_command_parser(sub_parser):
         sub_parser.add_argument(
             '-file', action='store', type=Path,
@@ -263,13 +332,25 @@ if __name__ == '__main__':
             default=DEFAULT_DB_PATH,
             help='db file')
         sub_parser.add_argument(
-            '-symbols', action='store', help="comma separated symbols to filter")
+            '-symbols', action='store',
+            help="comma separated symbols to filter")
         sub_parser.add_argument(
-            '-account', action='store', default='joint',
+            '-account', action='store', default='both',
             choices=('joint', 'single', 'both'), help='account type')
         sub_parser.add_argument(
-            '-dates', action='store',
-            help="comma separated date in the format of YYMMDD")
+            '-expiration', action='store',
+            help=('Expiration of the options using date format yymmdd. '
+                  'Multiple option expirations can be separated by comma.'))
+        sub_parser.add_argument(
+            '-dates', action='store', default="",
+            help=('start and end date separated by "-"'
+                  'for example 210101-220101 represents date between '
+                  '01/01/2021 and 01/01/2022. Multiple date ranges can be '
+                  'separated by comma, date range can be open ended. For '
+                  'example, 210101- means all date >= 01/01/2021 or '
+                  '-220101 means all dates <= 01/01/2022. Single date can '
+                  'be sepcify without "-". Comma can be used for multiple '
+                  'dates'))
         sub_parser.add_argument(
             '-summary', action='store_true', help='generate a summary only')
 
@@ -279,11 +360,19 @@ if __name__ == '__main__':
         sub_parsers = cli_parser.add_subparsers(
             help='sub commands', dest='sub_command')
         csv_file_parser = sub_parsers.add_parser('csv', help='csv sub command')
-        db_file_parser = sub_parsers.add_parser('db', help='db sub command')
+        db_file_parser = sub_parsers.add_parser(
+            'db', help='db sub command, default sub command')
         build_csv_sub_command_parser(csv_file_parser)
         build_db_sub_command_parser(db_file_parser)
         return cli_parser
 
     cli_parser = build_args_parser()
-    cli_args = cli_parser.parse_args()
+    if len(sys.argv) == 1:
+        cli_args = cli_parser.parse_args(['db'])
+    elif sys.argv[1] not in ('db', 'csv')\
+            and sys.argv[1] not in ('-h', '--h', '--help') \
+            and sys.argv[1].startswith('-'):
+        cli_args = cli_parser.parse_args(['db'] + sys.argv[1:])
+    else:
+        cli_args = cli_parser.parse_args()
     _main_entrypoint(cli_args)
