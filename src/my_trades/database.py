@@ -294,13 +294,13 @@ def insert_transactions(
 
 def _main_entrypoint(cli_args):
     conn = init_connection(f'{cli_args.db.resolve()}')
-    if cli_args.account == 'generic':
+    if cli_args.account_number == 'generic':
         account_number = f'{cli_args.file.resolve().name}'.lower() \
             .split('.csv')[0].split('_')[-1].upper()
     else:
-        account_number = cli_args.account
+        account_number = cli_args.account_number
     transactions = csv_to_transactions(f'{cli_args.file}', account_number)
-    insert_transactions(transactions, cli_args.account_type)(conn)
+    insert_transactions(transactions, cli_args.account)(conn)
 
 
 DEFAULT_DB_FILE = 'trades.db'
@@ -315,10 +315,10 @@ if __name__ == '__main__':
         type=Path,
         help='csv gain lost file')
     cli_parser.add_argument(
-        '-account', action='store', default='generic',
+        '-account_number', action='store', default='generic',
         help='account number')
     cli_parser.add_argument(
-        '-account_type', action='store', default='joint',
+        '-account', action='store', default='joint',
         choices=('joint', 'single'),
         help="type of account, default to 'joint'")
     cli_parser.add_argument(
