@@ -8,6 +8,7 @@ from itertools import count
 from operator import attrgetter
 from pathlib import Path
 from uuid import uuid3, NAMESPACE_URL
+from .logger import logger
 
 
 SYMBOL = 0
@@ -151,16 +152,20 @@ def build_transaction(account_number: str,
 
 
 def csv_entry_to_transaction(csv_entry, account_number: str):
-    symbol, cusip, expiration, option_type, strike = extract_symbol(
-        csv_entry[SYMBOL])
+    try:
+        symbol, cusip, expiration, option_type, strike = extract_symbol(
+            csv_entry[SYMBOL])
 
-    if option_type is None:
-        holding = Stock(symbol)
-    elif option_type == 'p':
-        holding = Put(symbol, strike, expiration)
-    elif option_type == 'c':
-        holding = Call(symbol, strike, expiration)
-    return build_transaction(account_number, holding, cusip, csv_entry)
+        if option_type is None:
+            holding = Stock(symbol)
+        elif option_type == 'p':
+            holding = Put(symbol, strike, expiration)
+        elif option_type == 'c':
+            holding = Call(symbol, strike, expiration)
+        return build_transaction(account_number, holding, cusip, csv_entry)
+    except ValueError:
+        logger.warning(f'{csv_entry} not processed!')
+        raise
 
 
 def csv_to_transactions(csv_file: str,
@@ -168,6 +173,8 @@ def csv_to_transactions(csv_file: str,
     with Path(csv_file).expanduser().open('r') as text_stream:
         csv_reader = reader(text_stream)
         next(csv_reader)
-        yield from (
-            csv_entry_to_transaction(entry, account_number)
-            for entry in csv_reader)
+        for entry in csv_reader:
+            try:
+                yield csv_entry_to_transaction(entry, account_number)
+            except ValueError:
+                continue
