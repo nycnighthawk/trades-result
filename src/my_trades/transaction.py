@@ -37,8 +37,9 @@ def in_date_range(
     return is_date_in_range
 
 
-WASHED_TRANSACTION_30_DAYS_BEFORE = relativedelta(days=-30)
-WASHED_TRANSACTION_30_DAYS_AFTER = relativedelta(days=30)
+DEFAULT_DAY_RANGE = 30
+DAYS_BEFORE = relativedelta(days=-DEFAULT_DAY_RANGE)
+DAYS_AFTER = relativedelta(days=DEFAULT_DAY_RANGE)
 
 
 def filter_transaction_by_dates(dates: str):
@@ -49,14 +50,14 @@ def filter_transaction_by_dates(dates: str):
             datetime.strptime(date_text.strip(), '%y%m%d').date() for date_text
             in dates.split(',')
         }
-    washed_transaction_periods = {
-        (date_entry + WASHED_TRANSACTION_30_DAYS_BEFORE,
-         date_entry + WASHED_TRANSACTION_30_DAYS_AFTER) for date_entry in
+    transaction_period = {
+        (date_entry + DAYS_BEFORE,
+         date_entry + DAYS_AFTER) for date_entry in
         filtered_dates
     }
 
-    is_date_within_washed_sale_period = in_date_range(
-        washed_transaction_periods)
+    is_date_within_period = in_date_range(
+        transaction_period)
 
     def transaction_in_filtered_date(transaction):
         if not filtered_dates:
@@ -65,8 +66,8 @@ def filter_transaction_by_dates(dates: str):
             if transaction.holding.expiration in filtered_dates:
                 return True
             return False
-        if is_date_within_washed_sale_period(transaction.acquired_date) \
-                or is_date_within_washed_sale_period(transaction.sold_date):
+        if is_date_within_period(transaction.acquired_date) \
+                or is_date_within_period(transaction.sold_date):
             return True
         return False
 
@@ -94,6 +95,8 @@ def filter_transaction_by_symbols(symbols: str):
 REPORT_DATE_FORMAT = '%m-%d-%Y'
 ZERO = Decimal(0)
 
+bool_to_yes_no = lambda v: "Y" if v else "N"
+
 
 def extract_report_component(
     transaction: Transaction
@@ -108,7 +111,8 @@ def extract_report_component(
             transaction.sold_date.strftime(REPORT_DATE_FORMAT),
             transaction.cost,
             transaction.proceed,
-            gain_loss)
+            gain_loss,
+            bool_to_yes_no(transaction.wash_sale))
     elif isinstance(transaction.holding, Put):
         return (
             transaction.quantity,
@@ -118,31 +122,33 @@ def extract_report_component(
             transaction.sold_date.strftime(REPORT_DATE_FORMAT),
             transaction.cost,
             transaction.proceed,
-            gain_loss)
+            gain_loss,
+            bool_to_yes_no(transaction.wash_sale))
     return (
         transaction.quantity, '', '',
         transaction.acquired_date.strftime(REPORT_DATE_FORMAT),
         transaction.sold_date.strftime(REPORT_DATE_FORMAT),
         transaction.cost,
         transaction.proceed,
-        gain_loss
-    )
+        gain_loss,
+        bool_to_yes_no(transaction.wash_sale))
 
 
 header_format = ('| {:10} | {:<10.2} | {:<10} | {:10} | '
-                 '{:10} | {:10} | {:10} | {:10} | {:10} |').format
+                 '{:10} | {:10} | {:10} | {:10} | {:10} | {:9} |').format
 entry_format = ('| {:10} | {:<10.2f} | {:<10} | {:10} | {:10} '
-                '| {:10} | {:10} | {:10} | {:10} |').format
-header_break = '+' + '='* 116 + '+'
+                '| {:10} | {:10} | {:10} | {:10} | {:9} |').format
+header_break = '+' + '='* 128 + '+'
 # entry_break = '+' + '-' * 103 + '+'
-entry_break = '+' + ('-' * 12 + '+') + ('-' * 12 + '+') * 7 + '-' * 12 + '+'
+entry_break = ('+' + ('-' * 12 + '+') + ('-' * 12 + '+') * 7
+               + '-' * 12 + '+' + '-' * 11 + '+')
 
 
 def report_in_text(result: dict):
     yield header_break
     yield header_format(
         'Symbol', 'quantity', 'Strike', 'Expiration', 'Acquired', 'Sold',
-        'Cost', 'Proceed', 'Gain/Loss')
+        'Cost', 'Proceed', 'Gain/Loss', 'Wash Sale')
     yield header_break
     total_summary = Decimal(0)
     for symbol, transactions in result.items():
@@ -155,13 +161,14 @@ def report_in_text(result: dict):
                     symbol, *extract_report_component(transaction))
             else:
                 yield entry_format('', *extract_report_component(transaction))
-            total += transaction.proceed - transaction.cost
+            if not transaction.wash_sale:
+                total += transaction.proceed - transaction.cost
         total_summary += total
         yield entry_break
-        yield '|' + ' ' * 90 + '| {:10} | {:10} |'.format('gain/loss', total)
+        yield '|' + ' ' * 90 + '| {:10} | {:10} | {:9} |'.format('gain/loss', total, '')
         yield entry_break
-    yield '|' + ' ' * 77 + '| {:>23} | {:10} |'.format(
-        'total gain/loss', total_summary)
+    yield '|' + ' ' * 77 + '| {:>23} | {:10} | {:9} |'.format(
+        'total gain/loss', total_summary, '')
     yield entry_break
 
 

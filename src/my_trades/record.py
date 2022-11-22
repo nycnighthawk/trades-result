@@ -7,6 +7,7 @@ from decimal import Decimal
 from itertools import count
 from operator import attrgetter
 from pathlib import Path
+from typing import Iterable
 from uuid import uuid3, NAMESPACE_URL
 from .logger import logger
 
@@ -16,6 +17,7 @@ DESCRIPTION = 1
 QUANTITY = 2
 ACQUIRED_DATE = 3
 SOLD_DATE = 4
+WASH_SALE = 4
 PROCEED = 5
 COST = 6
 # SHORT_TERM_GAIN_LOSS = 7
@@ -57,6 +59,7 @@ class Transaction:
     cost: Decimal
     proceed: Decimal
     transaction_id: str = ''
+    wash_sale: bool = False
 
     def __post_init__(self):
         if self.transaction_id == '':
@@ -69,7 +72,7 @@ class Transaction:
         return self.__dict__.get(key)
 
 
-def new_transaction_id():
+def _new_transaction_id():
     registry = defaultdict(lambda: count(1))
 
     transaction_fields = attrgetter(
@@ -84,7 +87,7 @@ def new_transaction_id():
     return generate_id
 
 
-new_transaction_id = new_transaction_id()
+new_transaction_id = _new_transaction_id()
 
 
 def convert_currency(value):
@@ -121,7 +124,7 @@ def extract_symbol(value):
                 symbol_raw[digit_start + 6].lower(),
                 Decimal(symbol_raw[digit_start + 7:]))
     for n in range(digit_start + 7, len(symbol_raw) + 1):
-        if symbol_raw[n] in OPTIONS_TYPES:
+        if symbol_raw[n] in OPTION_TYPES:
             return (symbol_raw[:n-6].lower(), cusip,
                     extract_option_date(symbol_raw[n-6:n]),
                     symbol_raw[n].lower(),
@@ -135,7 +138,7 @@ DATE_FORMAT = '%m/%d/%Y'
 def build_transaction(account_number: str,
                       holding: Stock | Call | Put,
                       cusip: str,
-                      csv_entry):
+                      csv_entry) -> Transaction:
     acquired_date = datetime.strptime(
         csv_entry[ACQUIRED_DATE], DATE_FORMAT).date()
     sold_date = datetime.strptime(
@@ -152,29 +155,48 @@ def build_transaction(account_number: str,
 
 
 def csv_entry_to_transaction(csv_entry, account_number: str):
+    symbol, cusip, expiration, option_type, strike = extract_symbol(
+        csv_entry[SYMBOL])
+
+    if option_type is None:
+        holding = Stock(symbol)
+    elif option_type == 'p':
+        holding = Put(symbol, strike, expiration)
+    elif option_type == 'c':
+        holding = Call(symbol, strike, expiration)
+    return build_transaction(account_number, holding, cusip, csv_entry)
+
+
+def fixup_wash_sale(csv_entry, transaction: Transaction | None):
     try:
-        symbol, cusip, expiration, option_type, strike = extract_symbol(
-            csv_entry[SYMBOL])
-
-        if option_type is None:
-            holding = Stock(symbol)
-        elif option_type == 'p':
-            holding = Put(symbol, strike, expiration)
-        elif option_type == 'c':
-            holding = Call(symbol, strike, expiration)
-        return build_transaction(account_number, holding, cusip, csv_entry)
-    except ValueError:
-        logger.warning(f'{csv_entry} not processed!')
-        raise
+        assert transaction is not None
+        assert csv_entry[WASH_SALE].lower() == 'wash sale'
+        wash_sale_amount = convert_currency(csv_entry[COST].rstrip())
+        assert \
+            (transaction.proceed - transaction.cost) == wash_sale_amount
+        transaction.wash_sale = True
+    except AssertionError:
+        logger.warn(f'Not Processed: {csv_entry}')
 
 
-def csv_to_transactions(csv_file: str,
-                        account_number: str = 'generic'):
+def csv_to_transactions(
+    csv_file: str,
+    account_number: str = 'generic'
+) -> Iterable[Transaction]:
     with Path(csv_file).expanduser().open('r') as text_stream:
         csv_reader = reader(text_stream)
         next(csv_reader)
+        current_transaction = None
+        fixup_transaction = None
         for entry in csv_reader:
             try:
-                yield csv_entry_to_transaction(entry, account_number)
+                current_transaction = csv_entry_to_transaction(
+                    entry, account_number)
+                if fixup_transaction is not None:
+                    yield fixup_transaction
+                fixup_transaction = current_transaction
             except ValueError:
+                fixup_wash_sale(entry, fixup_transaction)
                 continue
+        if fixup_transaction is not None:
+            yield fixup_transaction

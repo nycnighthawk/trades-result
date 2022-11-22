@@ -51,6 +51,7 @@ CREATE TABLE trade (
     cost INTEGER NOT NULL,
     proceed INTEGER NOT NULL,
     description TEXT DEFAULT "" NOT NULL,
+    wash_sale INTEGER DEFAULT 0 NOT NULL,
     PRIMARY KEY (transaction_id),
     FOREIGN KEY (symbol) REFERENCES symbol(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (equity_class) REFERENCES equity_class(equity_class) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -111,6 +112,7 @@ class Trade:
     cost: int
     proceed: int
     description: str
+    wash_sale: int = 0
 
 
 STOCK_CLASS = 'stock'
@@ -122,7 +124,8 @@ def stock_to_trade(stock: Transaction):
                  stock.holding.symbol, STOCK_CLASS, 0,
                  int(stock.quantity * 100), None, stock.acquired_date,
                  stock.sold_date, int(stock.cost * 100),
-                 int(stock.proceed * 100), stock.description)
+                 int(stock.proceed * 100), stock.description,
+                 int(stock.wash_sale))
 
 
 def option_to_trade(option: Transaction) -> Trade:
@@ -134,7 +137,8 @@ def option_to_trade(option: Transaction) -> Trade:
                  int(option.holding.strike * 100), int(option.quantity * 100),
                  option.holding.expiration, option.acquired_date,
                  option.sold_date, int(option.cost *  100),
-                 int(option.proceed * 100), option.description)
+                 int(option.proceed * 100), option.description,
+                 int(option.wash_sale))
 
 
 def _to_decimal(value):
@@ -175,7 +179,8 @@ def trade_row_to_transaction(row: sqlite3.Row) -> Transaction:
         row['acquired_date'],
         row['sold_date'],
         _to_decimal(row['cost']),
-        _to_decimal(row['proceed']), row['transaction_id'])
+        _to_decimal(row['proceed']), row['transaction_id' ],
+        bool(row['wash_sale']))
 
 
 def trade_row_to_trade(row: sqlite3.Row) -> Trade:
@@ -186,7 +191,7 @@ def trade_row_to_trade(row: sqlite3.Row) -> Trade:
         row['expiration'],
         row['acquired_date'],
         row['sold_date'],
-        row['cost'], row['proceed'], row['description'])
+        row['cost'], row['proceed'], row['description'], row['wash_sale'])
 
 
 def transactions_to_trades(
@@ -206,9 +211,11 @@ INSERT_TRADE_SQL = """
 INSERT INTO trade (
     transaction_id, cusip, symbol, account_number, equity_class, strike,
     quantity, expiration, acquired_date, sold_date,
-    cost, proceed, description)
+    cost, proceed, description, wash_sale)
 VALUES
-    (?,?,?,?,?,?,?,?,?,?,?,?,?);
+    (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(transaction_id) DO UPDATE
+    SET wash_sale=excluded.wash_sale;
 """
 INSERT_ACCOUNT_SQL = """
 INSERT INTO account (account_number, account_type)
@@ -243,7 +250,7 @@ def insert_transactions(
                    trade.equity_class, trade.strike, trade.quantity,
                    trade.expiration, trade.acquired_date,
                    trade.sold_date, trade.cost, trade.proceed,
-                   trade.description)
+                   trade.description, trade.wash_sale)
 
     def prepare_account(accounts: Iterable[str]) -> Iterable[tuple]:
         for account in accounts:
@@ -280,7 +287,8 @@ def insert_transactions(
             transaction_id[0] for transaction_id
             in connection.execute(GET_TRANSACTION_ID_SQL)}
         trades_not_in_db = filter(
-            lambda x: x.transaction_id not in existing_transaction_ids, trades)
+            lambda x: (x.transaction_id not in existing_transaction_ids
+                or x.wash_sale != 0), trades)
         trades_not_in_db, account_processing, symbol_processing = \
             tee(trades_not_in_db, 3)
         insert_account_to_db(account_processing, connection)
@@ -293,6 +301,7 @@ def insert_transactions(
 
 
 def _main_entrypoint(cli_args):
+    print(f"DB: {cli_args.db.resolve()}")
     conn = init_connection(f'{cli_args.db.resolve()}')
     if cli_args.account_number == 'generic':
         account_number = f'{cli_args.file.resolve().name}'.lower() \
@@ -304,8 +313,8 @@ def _main_entrypoint(cli_args):
 
 
 DEFAULT_DB_FILE = 'trades.db'
-DEFAULT_DB_PATH = (Path(__file__).expanduser() \
-                   / '../../../playground').resolve() / DEFAULT_DB_FILE
+DEFAULT_DB_PATH = (Path('~').expanduser()
+                   / f'.local/my-trades/{DEFAULT_DB_FILE}').resolve()
 
 if __name__ == '__main__':
     import argparse
