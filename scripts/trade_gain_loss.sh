@@ -1,10 +1,12 @@
 #!/bin/bash
-if [ -d "${HOME}/projects/my_trades/venv" ]
+script_dir="$(dirname $(readlink -f ${BASH_SOURCE}))/.."
+
+if [ -d "${script_dir}/venv" ]
 then
-    my_trades_venv="${HOME}/projects/my_trades/venv"
-elif [ -d "${HOME}/projects/my_trades/.venv" ]
+    my_trades_venv="${script_dir}/venv"
+elif [ -d "${script_dir}/.venv" ]
 then
-    my_trades_venv="${HOME}/projects/my_trades/.venv"
+    my_trades_venv="${script_dir}/.venv"
 fi
 . "${my_trades_venv}/bin/activate"
 python -m my_trades.gain_loss "$@"
