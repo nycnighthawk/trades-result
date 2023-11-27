@@ -36,12 +36,12 @@ def test_cls_case_insensitive_dict(case_insensitive_test_data):
 
 
 def test_table():
-    t1 = S.Table(
+    t1 = S.TableSchema(
         "t1",
         S.Column("c1", S.DataType.integer, True),
         S.Column("c2", S.DataType.text),
     )
-    t2 = S.Table(
+    t2 = S.TableSchema(
         "t2",
         S.Column("c1", S.DataType.text),
         S.Column("c2", S.DataType.integer, foreign_key=S.ForeignKey(t1, "c1")),

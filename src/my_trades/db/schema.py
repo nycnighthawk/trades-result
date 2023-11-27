@@ -129,7 +129,7 @@ class CaseInsensitiveDict(dict):
         return super().__contains__(key)
 
 
-class Table:
+class TableSchema:
     """
     represent a table in a typical RDBMS
     """
@@ -171,7 +171,7 @@ class Table:
 
 @dataclass
 class ForeignKey:
-    table: Table
+    table: TableSchema
     column: str
     delete_action: Action = Action.cascade
     update_action: Action = Action.cascade
@@ -219,7 +219,7 @@ class Column:
 @dataclass
 class Schema:
     name: str
-    tables: CaseInsensitiveDict[str, Table]
+    tables: CaseInsensitiveDict[str, TableSchema]
 
     def __init__(self, name):
         self.name = name
@@ -233,4 +233,4 @@ class Schema:
             raise ValueError(
                 f"Cannot create the same table name in schema: {self.name}"
             )
-        self.tables[name] = Table(name, *columns)
+        self.tables[name] = TableSchema(name, *columns)
