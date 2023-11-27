@@ -133,3 +133,5 @@ dmypy.json
 **/private/**
 
 **/playground/**
+# vim tags
+**/tags
